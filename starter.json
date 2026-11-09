@@ -1,0 +1,21 @@
+{
+  "name": "Light Cycles",
+  "genre": "arcade",
+  "dim": "3D",
+  "mode": "Versus",
+  "players": "2–6",
+  "hook": "Your trail is a wall. Last rider wins.",
+  "how": "Every rider leaves a glowing wall behind it. Turn to cut the others off. Touch any wall or the edge and you are out. The last rider still going wins the round.",
+  "controls": "Arrow keys or A/D to turn, or tap the left or right side of the screen",
+  "uses": [
+    ["Leaderboard", "Rounds won, all time, shown after every round."],
+    ["Host-run rounds", "One player's browser runs the countdown, the winner and the bots; if it leaves, the next player takes over."],
+    ["Bots", "Bots fill the arena until enough people join."],
+    ["Live sync", "Every cycle and every wall shows for everyone at once."]
+  ],
+  "ideas": [
+    "Add a jump with a cooldown",
+    "Shrink the arena every 20 seconds",
+    "Make it a desert at sunset with sand-colored trails"
+  ]
+}

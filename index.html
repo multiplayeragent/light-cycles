@@ -1,0 +1,724 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Light Cycles</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #04050c; }
+  body { font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #e8f6ff; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; touch-action: none; }
+  .hud { position: fixed; pointer-events: none; text-shadow: 0 0 6px #000, 0 1px 3px #000; }
+  #info { top: max(12px, env(safe-area-inset-top)); left: max(14px, env(safe-area-inset-left)); font-size: 20px; font-weight: 800; }
+  #info small { display: block; font-size: 12px; font-weight: 600; opacity: .7; letter-spacing: .08em; text-transform: uppercase; }
+  #wins { top: calc(max(12px, env(safe-area-inset-top)) + 52px); left: max(14px, env(safe-area-inset-left)); font-size: 13px; min-width: 150px; }
+  #wins div { display: flex; align-items: center; gap: 8px; } #wins b { margin-left: auto; font-variant-numeric: tabular-nums; }
+  #wins i { width: 9px; height: 9px; border-radius: 2px; box-shadow: 0 0 6px currentColor; background: currentColor; }
+  #wins .out { opacity: .38; } #wins .me { font-weight: 800; }
+  #map { position: fixed; top: max(12px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); width: 116px; height: 116px;
+         border-radius: 10px; background: #000a; box-shadow: 0 0 0 1px #39f3ff44, 0 0 18px #39f3ff22; pointer-events: none; }
+  #count { inset: 0; display: grid; place-items: center; font-size: min(28vw, 170px); font-weight: 900; color: #fff; text-shadow: 0 0 20px #39f3ff, 0 0 60px #39f3ff; }
+  #msg { top: 24%; left: 0; right: 0; text-align: center; font-size: 20px; font-weight: 700; padding: 0 16px; }
+  #hint { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 104px); left: 0; right: 0; text-align: center; font-size: 15px; padding: 0 16px; transition: opacity .8s; }
+  #net { bottom: max(10px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); font-size: 12px; opacity: .75; white-space: nowrap; }
+  .touch #net { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 92px); } .touch #hint { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 120px); }
+  #over { position: fixed; inset: 0; display: grid; place-items: center; background: #02030a99; pointer-events: none; }
+  #over[hidden], .pad[hidden] { display: none; }
+  .card { width: min(360px, 88vw); max-height: 72vh; overflow: auto; padding: 20px; border-radius: 16px; background: #0a1024ee; border: 1px solid #39f3ff55;
+          box-shadow: 0 0 40px #39f3ff33; pointer-events: auto; }
+  .card h2 { margin: 0 0 10px; font-size: 24px; text-align: center; }
+  .card h3 { margin: 14px 0 4px; font-size: 13px; color: #39f3ff; text-transform: uppercase; letter-spacing: .06em; }
+  .card ol { margin: 0; padding-left: 24px; font-size: 14px; }
+  .card li span { float: right; font-variant-numeric: tabular-nums; }
+  .card li.me { color: #ffe53d; font-weight: 700; }
+  .card p { margin: 12px 0 0; font-size: 13px; opacity: .8; text-align: center; }
+  .pad { position: fixed; bottom: max(16px, env(safe-area-inset-bottom)); width: 84px; height: 84px; border-radius: 50%; border: 2px solid #39f3ff88;
+         background: #39f3ff14; color: #fff; font: 800 26px system-ui, sans-serif; touch-action: none; }
+  .pad.on { background: #39f3ff55; }
+  #padL { left: max(16px, env(safe-area-inset-left)); } #padR { right: max(16px, env(safe-area-inset-right)); }
+</style>
+<script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
+<script type="importmap">{ "imports": { "three": "./libs/three.module.min.js" } }</script>
+</head>
+<body>
+<div class="hud" id="info"></div>
+<div class="hud" id="wins"></div>
+<canvas id="map"></canvas>
+<div class="hud" id="count"></div>
+<div class="hud" id="msg"></div>
+<div class="hud" id="hint"></div>
+<div class="hud" id="net">Connecting…</div>
+<button class="pad" id="padL" hidden>◀</button>
+<button class="pad" id="padR" hidden>▶</button>
+<div id="over" hidden><div class="card">
+  <h2 id="winner">Round over</h2>
+  <ol id="standings"></ol>
+  <h3>Most rounds won, all time</h3><ol id="board"><li>Loading…</li></ol>
+  <p id="next"></p>
+</div></div>
+<script type="module">
+/* ═══ LIGHT CYCLES · a Multiplayer Agent starter ══════════════════════════════════════
+ * Your trail is a wall. Last rider wins. Versus, 2–6 players; bots fill empty seats.
+ *
+ * WHERE THINGS ARE (search for the "── " headers):
+ *   CONFIG ........ arena size, speed, round timers, bots, start spots
+ *   CONNECTION .... MP_CONNECT, joining, the offline room, who is host
+ *   GRID .......... the arena as cells: whose wall is where, free-space checks
+ *   ARENA ......... the 3D scene: floor, edges, glowing trail walls, the cycle model
+ *   ROUND (HOST) .. countdown, ride, round over, wins, and the bots. Only the host writes these.
+ *   MY CYCLE ...... turning, moving cell by cell, crashing. Each player writes only its own.
+ *   EFFECTS ....... explosions, derez, sound
+ *   HUD & RESULTS . riders left, wins, countdown, minimap, results card, leaderboard
+ *   INPUT ......... keyboard, tap left/right, on-screen buttons
+ *
+ * HOW THE MULTIPLAYER WORKS (a relay room: no server code):
+ *   - Cycles move one grid cell at a time and only turn 90°, so a trail is just its
+ *     turn points. Each player writes its OWN entity: `trail` {r, p:[[x,z],…]} when it
+ *     turns, `bike` {r, x, z, d, a} (cell, heading, alive) on every cell step,
+ *     `hb` (heartbeat) once a second, and `n`/`color` once. `r` is the round id.
+ *   - Each rider decides its own crash (its own fact): it sets a:0 in `bike`.
+ *   - The HOST is the lowest sessionId among live players (heartbeat seen in the last
+ *     3s), worked out every frame. Only the host writes the shared fields `round`
+ *     {id, v, phase, startAt, endsAt, riders, alive, winner, wins}, `bots` and the bot
+ *     trails `bt0`…`bt5`. A new host adopts all of them from state and carries on.
+ *   - A new round starts only when the host bumps round.id; every client then puts its
+ *     cycle on its start spot. Someone who joins mid-round watches, then rides next round.
+ *   - No intents are needed: crashes are each rider's own fact, the rest is the host's.
+ *   - ?attract plays offline with bots only (the preview video is recorded from it).
+ *   - Leaderboard "rounds-won": +1 for each round you win, shown on the results card.
+ */
+import * as THREE from "three";
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────────────
+const CONFIG = {
+  arena: 64,           // the arena is arena × arena cells (one cell = one world unit)
+  speed: 12,           // cells per second
+  seats: 4,            // bots fill each round up to this many riders
+  maxRiders: 6,        // riders per round; anyone else watches and rides the next one
+  countdown: 3000,     // ms on the start spots before GO
+  overFor: 4500,       // ms the result shows before the next round
+  maxRound: 90000,     // ms before a round ends in a draw
+  closeCall: 400,      // ms: if the last two crash this close together, it's a draw
+  botLook: [2, 6],     // a bot starts dodging when a wall is this many cells ahead (each bot gets one)
+  botMistake: 0.06,    // chance a bot misjudges a dodge
+  botSwerve: 0.035,    // chance per cell a bot turns on purpose (toward a rival or open space)
+  wallHeight: 1.1,     // trail wall height, world units
+  board: "rounds-won", // leaderboard name
+  // Start spots: [x, z, heading], x and z as a share of the arena. Heading 0 east, 1 south, 2 west, 3 north.
+  spawns: [[0.15, 0.35, 0], [0.85, 0.65, 2], [0.65, 0.15, 1], [0.35, 0.85, 3], [0.1, 0.55, 0], [0.9, 0.45, 2]],
+};
+const BOT_NAMES = ["Volt", "Pixel", "Flux", "Glitch", "Quark", "Neon"];
+const COLORS = ["#39f3ff", "#ff8a1f", "#ff3df0", "#9dff3a", "#ffe53d", "#8f6bff", "#ff4d6a", "#5dffb8"];
+
+// ── CONNECTION ──────────────────────────────────────────────────────────────────────
+// The builder fills these in for this game. Downloaded from GitHub? Put your own pk_ key here.
+const MP_CONNECT = {
+  key: 'pk_REPLACE_ME',
+  room: 'light-cycles',
+  endpoint: 'wss://live.multiplayeragent.com',
+  apiUrl: 'https://api.multiplayeragent.com',
+};
+const ATTRACT = new URLSearchParams(location.search).has("attract");
+if (ATTRACT) Object.assign(CONFIG, { arena: 48, seats: 6, speed: 13, countdown: 1200, overFor: 1400, botMistake: 0.01, botSwerve: 0.06 });
+
+/** Same shape as the SDK client, kept in this tab: offline play and ?attract. */
+function localRoom() {
+  const id = "local", state = { entities: { players: { [id]: {} } }, shared: {} }, subs = [];
+  let queued = false;
+  const emit = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; subs.forEach((f) => f(state)); }); } };
+  const put = (o, k, v) => { if (typeof k === "object") Object.assign(o, k); else o[k] = v; emit(); };
+  return {
+    sessionId: id, state, offline: true,
+    me: { set: (k, v) => put(state.entities.players[id], k, v) },
+    setShared: (k, v) => put(state.shared, k, v),
+    onState: (f) => { subs.push(f); f(state); }, onJoin() {}, onLeave() {}, on() {}, send() {},
+    onDisconnect() {}, onReconnect() {}, leave: async () => {},
+  };
+}
+async function connect() {
+  if (ATTRACT || typeof MP === "undefined") return localRoom();
+  try {
+    const mp = await Promise.race([MP.join({ ...MP_CONNECT }), new Promise((_, no) => setTimeout(() => no(new Error("timed out")), 10000))]);
+    window.mp = mp; // the builder calls window.mp.leave() when the page closes
+    return mp;
+  } catch (e) {
+    console.warn("Playing offline:", e && e.message);
+    return localRoom();
+  }
+}
+const parse = (v, fb) => { if (typeof v !== "string") return fb; try { return JSON.parse(v); } catch { return fb; } };
+let net = null, S = { entities: { players: {} }, shared: {} };
+const memo = new Map();
+/** A shared JSON field, parsed once per change (read-only: never mutate what this returns). */
+function shared(key, fb) { const raw = S.shared[key], m = memo.get(key); if (m && m.raw === raw) return m.v; const v = parse(raw, fb); memo.set(key, { raw, v }); return v; }
+/** A JSON field on another player's entity, parsed once per change (read-only). */
+function field(id, key) { const raw = S.entities.players[id]?.[key], k = id + "/" + key, m = memo.get(k); if (m && m.raw === raw) return m.v; const v = parse(raw, null); memo.set(k, { raw, v }); return v; }
+const seenHb = new Map();
+function livePlayers() {
+  const now = performance.now(), out = [];
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    const s = seenHb.get(id);
+    if (!s || s.hb !== p.hb) seenHb.set(id, { hb: p.hb, at: now });
+    if (id === net.sessionId || now - seenHb.get(id).at < 3000) out.push(id);
+  }
+  return out.sort();
+}
+const isHost = () => livePlayers()[0] === net.sessionId;
+
+// ── GRID ────────────────────────────────────────────────────────────────────────────
+const A = CONFIG.arena;
+const DX = [1, 0, -1, 0], DZ = [0, 1, 0, -1];      // heading 0 east, 1 south, 2 west, 3 north
+const turnLeft = (d) => (d + 3) % 4, turnRight = (d) => (d + 1) % 4;
+const inside = (x, z) => x >= 0 && z >= 0 && x < A && z < A;
+const wx = (x) => x - A / 2 + 0.5, wz = (z) => z - A / 2 + 0.5; // cell -> world
+const heading = (d) => Math.atan2(DX[d], DZ[d]);
+// Most turn points one trail may hold, so the field stays under 2048 characters.
+const MAX_TURNS = Math.floor(1950 / (String(A).length * 2 + 4));
+function spawnOf(slot) { const [fx, fz, d] = CONFIG.spawns[slot % CONFIG.spawns.length]; return { x: Math.floor(fx * A), z: Math.floor(fz * A), d }; }
+
+const grid = new Uint8Array(A * A); // 0 = free, otherwise 1 + the index of the rider whose wall it is
+const gridOwner = new Map();        // rider id -> the value its walls have in `grid`
+const free = (x, z) => inside(x, z) && !grid[z * A + x];
+function markLine(ax, az, bx, bz, v) {
+  if (ax !== bx && az !== bz) return; // half-arrived update (looks diagonal): skip until it settles
+  const sx = Math.sign(bx - ax), sz = Math.sign(bz - az), n = Math.abs(bx - ax) + Math.abs(bz - az);
+  for (let k = 0; k <= n; k++) { const x = ax + sx * k, z = az + sz * k; if (inside(x, z)) grid[z * A + x] = v; }
+}
+/** Rebuild the walls from every living rider's turn points + current cell. */
+function buildGrid(list) {
+  grid.fill(0); gridOwner.clear();
+  list.forEach((r, i) => {
+    gridOwner.set(r.id, i + 1);
+    if (!r.alive) return;
+    for (let k = 0; k < r.trail.length; k++) { const a = r.trail[k], b = r.trail[k + 1] || [r.x, r.z]; markLine(a[0], a[1], b[0], b[1], i + 1); }
+  });
+}
+function freeRun(x, z, d, max) { let n = 0; while (n < max && free(x + DX[d] * (n + 1), z + DZ[d] * (n + 1))) n++; return n; }
+const seen = new Uint32Array(A * A); let stamp = 0;
+/** How many cells you can still reach by going `d` from (x, z), up to `limit`. */
+function space(x, z, d, limit) {
+  const sx = x + DX[d], sz = z + DZ[d];
+  if (!free(sx, sz)) return 0;
+  const q = [sz * A + sx]; seen[q[0]] = ++stamp;
+  for (let n = 0; n < q.length && q.length < limit; n++) {
+    const cx = q[n] % A, cz = (q[n] / A) | 0;
+    for (let k = 0; k < 4; k++) { const nx = cx + DX[k], nz = cz + DZ[k], j = nz * A + nx; if (free(nx, nz) && seen[j] !== stamp) { seen[j] = stamp; q.push(j); } }
+  }
+  return q.length;
+}
+
+// ── ARENA ───────────────────────────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color("#04050c");
+scene.fog = new THREE.Fog("#1c0c44", 24, 90); // the same violet as the horizon, so the floor fades into it
+const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 300);
+function fit() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.fov = camera.aspect < 1 ? 86 : 70; camera.updateProjectionMatrix(); }
+addEventListener("resize", fit); addEventListener("orientationchange", fit); fit();
+scene.add(new THREE.HemisphereLight("#9fd8ff", "#0a0f22", 1.2));
+// Sky: a dome that glows violet at the horizon, with a few stars.
+const skyGeo = new THREE.SphereGeometry(220, 32, 16), skyCols = [], skyTop = new THREE.Color("#02030a"), skyLow = new THREE.Color("#1c0c44");
+for (let i = 0, p = skyGeo.attributes.position; i < p.count; i++) skyCols.push(...skyLow.clone().lerp(skyTop, Math.min(1, Math.max(0, p.getY(i) / 120))).toArray());
+skyGeo.setAttribute("color", new THREE.Float32BufferAttribute(skyCols, 3));
+scene.add(new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false })));
+const starPos = []; for (let i = 0; i < 400; i++) { const a = Math.random() * Math.PI * 2, y = 20 + Math.random() * 180; starPos.push(Math.cos(a) * 200, y, Math.sin(a) * 200); }
+const stars = new THREE.Points(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(starPos, 3)), new THREE.PointsMaterial({ color: "#9fd8ff", size: 1.6, sizeAttenuation: false, fog: false }));
+scene.add(stars);
+const sun = new THREE.DirectionalLight("#ffffff", 1.2); sun.position.set(20, 40, 10); scene.add(sun);
+
+function canvasTex(w, h, paint) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h; paint(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+}
+// The floor: one texture tile = 4×4 cells. The arena is brighter than the outside.
+const gridTex = (minor, major) => canvasTex(256, 256, (c, w) => {
+  c.fillStyle = "#050816"; c.fillRect(0, 0, w, w);
+  c.fillStyle = minor; for (let i = 1; i < 4; i++) { c.fillRect(i * 64 - 1, 0, 2, w); c.fillRect(0, i * 64 - 1, w, 2); }
+  c.fillStyle = major; c.fillRect(0, 0, 3, w); c.fillRect(0, 0, w, 3);
+});
+const floorIn = gridTex("#0e2244", "#1c4f8c"); floorIn.repeat.set(A / 4, A / 4);
+const floorOut = gridTex("#070d1c", "#0c1a33"); floorOut.repeat.set((A + 80) / 4, (A + 80) / 4);
+const arenaFloor = new THREE.Mesh(new THREE.PlaneGeometry(A, A), new THREE.MeshBasicMaterial({ map: floorIn }));
+arenaFloor.rotation.x = -Math.PI / 2; arenaFloor.position.y = 0.002; scene.add(arenaFloor);
+const outFloor = new THREE.Mesh(new THREE.PlaneGeometry(A + 80, A + 80), new THREE.MeshBasicMaterial({ map: floorOut }));
+outFloor.rotation.x = -Math.PI / 2; scene.add(outFloor);
+// The arena edge: four low glowing walls.
+const edgeMat = new THREE.MeshBasicMaterial({ color: "#39f3ff", transparent: true, opacity: 0.4 });
+for (const [x, z, sx, sz] of [[0, -A / 2, A + 0.4, 0.2], [0, A / 2, A + 0.4, 0.2], [-A / 2, 0, 0.2, A], [A / 2, 0, 0.2, A]]) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(sx, 1.2, sz), edgeMat); m.position.set(x, 0.6, z); scene.add(m);
+}
+
+// Trail walls: three instanced layers (hot core, soft glow, light on the floor), rebuilt every frame.
+const MAX_SEGS = 1800, box = new THREE.BoxGeometry(1, 1, 1), WHITE = new THREE.Color("#fff");
+const additive = (opacity) => new THREE.MeshBasicMaterial({ transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false });
+const layers = [
+  { mesh: new THREE.InstancedMesh(box, new THREE.MeshBasicMaterial(), MAX_SEGS), pad: 0.14, h: 1, y: 0.5 },
+  { mesh: new THREE.InstancedMesh(box, additive(0.16), MAX_SEGS), pad: 0.55, h: 1.3, y: 0.6 },
+  { mesh: new THREE.InstancedMesh(box, additive(0.3), MAX_SEGS), pad: 1.3, h: 0.02, y: 0.01, flat: true },
+];
+for (const l of layers) { for (let i = 0; i < MAX_SEGS; i++) l.mesh.setColorAt(i, WHITE); l.mesh.count = 0; l.mesh.frustumCulled = false; scene.add(l.mesh); }
+const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpP = new THREE.Vector3(), tmpS = new THREE.Vector3(), tmpC = new THREE.Color();
+let segN = 0;
+/** One straight piece of wall from cell (ax, az) to (bx, bz); hk scales the height (derez). */
+function addSeg(ax, az, bx, bz, color, hk) {
+  if (segN >= MAX_SEGS) return;
+  const cx = wx((ax + bx) / 2), cz = wz((az + bz) / 2), lx = Math.abs(bx - ax), lz = Math.abs(bz - az), h = CONFIG.wallHeight * hk;
+  tmpC.set(color);
+  for (const l of layers) {
+    const hh = l.flat ? l.h : h * l.h;
+    tmpM.compose(tmpP.set(cx, l.flat ? l.y : hh / 2, cz), tmpQ, tmpS.set(lx + l.pad, hh, lz + l.pad));
+    l.mesh.setMatrixAt(segN, tmpM); l.mesh.setColorAt(segN, tmpC);
+  }
+  segN++;
+}
+function finishSegs() { for (const l of layers) { l.mesh.count = segN; l.mesh.instanceMatrix.needsUpdate = true; l.mesh.instanceColor.needsUpdate = true; } segN = 0; }
+
+// The cycle: a dark body, glowing wheels and stripe, a light under it, and a name tag.
+const glowTex = canvasTex(64, 64, (c) => { const g = c.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, "#ffffffcc"); g.addColorStop(1, "#ffffff00"); c.fillStyle = g; c.fillRect(0, 0, 64, 64); });
+function makeBike(color, name) {
+  const g = new THREE.Group(), neon = new THREE.MeshBasicMaterial({ color });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.32, 1.25), new THREE.MeshStandardMaterial({ color: "#10162a", metalness: 0.6, roughness: 0.35 }));
+  body.position.y = 0.42; g.add(body);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.06, 1.27), neon); stripe.position.y = 0.42; g.add(stripe);
+  const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), new THREE.MeshStandardMaterial({ color: "#0b0f1e", emissive: color, emissiveIntensity: 0.35, roughness: 0.2 }));
+  canopy.scale.set(0.9, 0.7, 1.6); canopy.position.set(0, 0.62, 0.05); g.add(canopy);
+  for (const z of [-0.48, 0.48]) { const w = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.06, 6, 18), neon); w.rotation.y = Math.PI / 2; w.position.set(0, 0.28, z); g.add(w); }
+  const under = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.7 }));
+  under.scale.set(2.6, 2.6, 1); under.position.y = 0.15; g.add(under);
+  if (name) {
+    const tex = canvasTex(256, 64, (c) => { c.font = "bold 32px system-ui"; c.textAlign = "center"; c.lineWidth = 6; c.strokeStyle = "#000c"; c.strokeText(name, 128, 42); c.fillStyle = color; c.fillText(name, 128, 42); });
+    const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, sizeAttenuation: false })); tag.scale.set(0.2, 0.05, 1); tag.position.y = 1.6; g.add(tag);
+  }
+  scene.add(g); return g;
+}
+
+// ── ROUND (HOST) ────────────────────────────────────────────────────────────────────
+const host = { bots: new Map(), wasHost: false, last: null, endSince: 0, lastFlush: 0, dirty: new Set(), lastBots: "" };
+/** The round as state has it, or the host's own newer write that hasn't come back yet. `v` only goes up. */
+function round() { const r = shared("round", null); return host.last && isHost() && (!r || host.last.v > r.v) ? host.last : r; }
+function writeRound(r) { r = { ...r, v: (round()?.v ?? 0) + 1 }; host.last = r; net.setShared("round", JSON.stringify(r)); return r; }
+const rnd = (a, b) => a + Math.random() * (b - a);
+const nameOf = (id) => (id === net.sessionId ? myName : S.entities.players[id]?.n || "Rider");
+const colorOf = (id) => (id === net.sessionId ? myColor : S.entities.players[id]?.color || "#ffffff");
+/** A rider's name and color: a human's own entity once it has arrived, else what the round wrote. */
+const looks = (x) => (x.b ? { n: x.n, c: x.c } : { n: S.entities.players[x.i]?.n || x.n, c: S.entities.players[x.i]?.color || x.c });
+
+/** A new round: live players first, bots fill up to the seats, everyone on a shuffled start spot. */
+function newRound(id, oldWins) {
+  const list = livePlayers().slice(0, CONFIG.maxRiders).map((i) => ({ i, n: nameOf(i), c: colorOf(i) }));
+  const want = Math.min(CONFIG.maxRiders, Math.max(2, CONFIG.seats, list.length));
+  for (let k = 0; list.length < want; k++) {
+    const used = new Set(list.map((x) => x.c));
+    list.push({ i: "bot" + k, n: BOT_NAMES[k % BOT_NAMES.length], c: COLORS.find((c) => !used.has(c)) || COLORS[k % COLORS.length], b: 1 });
+  }
+  const slots = list.map((_, k) => k).sort(() => Math.random() - 0.5);
+  list.forEach((x, k) => { x.s = slots[k]; });
+  // The bots' world first, then the round that points at it.
+  host.bots.clear();
+  for (const x of list.filter((x) => x.b)) {
+    const sp = spawnOf(x.s);
+    host.bots.set(x.i, { id: x.i, slot: x.s, x: sp.x, z: sp.z, d: sp.d, f: 0, alive: true, trail: [[sp.x, sp.z]], look: Math.round(rnd(...CONFIG.botLook)) });
+    host.dirty.add(x.i);
+  }
+  flushBots(id, true);
+  const wins = {}; for (const x of list) if (oldWins[x.i]) wins[x.i] = oldWins[x.i];
+  return writeRound({ id, phase: "count", startAt: Date.now() + CONFIG.countdown, endsAt: 0, riders: list, alive: list.map((x) => x.i), winner: "", wins });
+}
+
+/** During the countdown, a player who just joined takes a bot's place (or a free spot). */
+function admitJoiners(r) {
+  const waiting = livePlayers().filter((id) => !r.riders.some((x) => x.i === id));
+  if (!waiting.length) return r;
+  const riders = [...r.riders];
+  for (const id of waiting) {
+    const bi = riders.findIndex((x) => x.b), freeSlot = CONFIG.spawns.findIndex((_, s) => !riders.some((x) => x.s === s));
+    if (bi >= 0) { host.bots.delete(riders[bi].i); riders[bi] = { i: id, n: nameOf(id), c: colorOf(id), s: riders[bi].s }; }
+    else if (riders.length < CONFIG.maxRiders && freeSlot >= 0) riders.push({ i: id, n: nameOf(id), c: colorOf(id), s: freeSlot });
+  }
+  if (riders.length === r.riders.length && riders.every((x, k) => x === r.riders[k])) return r;
+  flushBots(r.id, true);
+  return writeRound({ ...r, riders, alive: riders.map((x) => x.i) });
+}
+
+function riderAlive(x, r) {
+  if (x.b) return !!host.bots.get(x.i)?.alive;
+  if (x.i === net.sessionId) return me.roundId === r.id && me.inRound ? me.alive : true;
+  if (!livePlayers().includes(x.i)) return false; // left or froze: out
+  const bike = field(x.i, "bike");
+  return bike && bike.r === r.id ? !!bike.a : true; // hasn't caught up with this round yet
+}
+
+function hostTick(dt, now) {
+  if (!host.wasHost) adoptBots();
+  let r = round();
+  const t = Date.now();
+  if (!r) r = newRound(1, {});
+  if (r.phase === "count") {
+    r = admitJoiners(r);
+    if (t >= r.startAt) r = writeRound({ ...r, phase: "ride", startAt: t });
+  }
+  if (r.phase === "ride") {
+    moveBots(dt, r);
+    const alive = r.riders.filter((x) => riderAlive(x, r)).map((x) => x.i);
+    if (alive.join() !== r.alive.join()) r = writeRound({ ...r, alive });
+    if (alive.length > 1) host.endSince = 0; else if (!host.endSince) host.endSince = now;
+    const timeUp = t - r.startAt > CONFIG.maxRound;
+    if (timeUp || alive.length === 0 || (host.endSince && now - host.endSince >= CONFIG.closeCall)) {
+      const winner = alive.length === 1 && !timeUp ? alive[0] : ""; // nobody left = a draw, never a winner
+      const wins = { ...r.wins }; if (winner) wins[winner] = (wins[winner] || 0) + 1;
+      r = writeRound({ ...r, phase: "over", endsAt: t + CONFIG.overFor, winner, wins, alive });
+      host.endSince = 0;
+    }
+  }
+  if (r.phase === "over" && t >= r.endsAt) r = newRound(r.id + 1, r.wins);
+  flushBots(r.id, false, now);
+}
+
+/** Become host: take over the bots exactly as state has them. */
+function adoptBots() {
+  host.wasHost = true; host.bots.clear(); host.endSince = 0;
+  const r = round(), all = shared("bots", null);
+  if (!r || !all || all.r !== r.id) return;
+  for (const b of all.b) {
+    const tr = shared("bt" + b.s, null);
+    host.bots.set(b.i, { id: b.i, slot: b.s, x: b.x, z: b.z, d: b.d, f: 0, alive: !!b.a, look: 4,
+      trail: tr && tr.r === r.id ? tr.p.map((p) => [...p]) : [[b.x, b.z]] });
+  }
+}
+
+/** Write the bots: changed trails first, then where every bot is. ~15 writes a second at most. */
+function flushBots(roundId, force, now = performance.now()) {
+  if (!force && now - host.lastFlush < 66) return;
+  host.lastFlush = now;
+  for (const id of host.dirty) { const b = host.bots.get(id); if (b) net.setShared("bt" + b.slot, JSON.stringify({ r: roundId, p: b.trail })); }
+  host.dirty.clear();
+  const raw = JSON.stringify({ r: roundId, b: [...host.bots.values()].map((b) => ({ i: b.id, s: b.slot, x: b.x, z: b.z, d: b.d, a: b.alive ? 1 : 0 })) });
+  if (raw !== host.lastBots) { host.lastBots = raw; net.setShared("bots", raw); }
+}
+
+function moveBots(dt, r) {
+  for (const b of host.bots.values()) {
+    if (!b.alive) continue;
+    b.f += CONFIG.speed * dt;
+    while (b.f >= 1 && b.alive) {
+      b.f -= 1;
+      b.x += DX[b.d]; b.z += DZ[b.d];
+      if (!free(b.x, b.z)) { // crashed: stop on the last free cell
+        b.x -= DX[b.d]; b.z -= DZ[b.d]; b.alive = false; b.f = 0;
+        boom(b.x + DX[b.d] * 0.5, b.z + DZ[b.d] * 0.5, r.riders.find((x) => x.i === b.id)?.c || "#fff"); break;
+      }
+      grid[b.z * A + b.x] = gridOwner.get(b.id) || 255;
+      const d = botChoose(b, false);
+      if (d !== b.d && b.trail.length < MAX_TURNS) { b.d = d; b.trail.push([b.x, b.z]); host.dirty.add(b.id); }
+    }
+  }
+}
+
+/** One bot's brain, run at every cell: dodge walls ahead, sometimes cut toward a rival. */
+function botChoose(b, perfect) {
+  const ahead = freeRun(b.x, b.z, b.d, 12);
+  const danger = ahead <= b.look;
+  const swerve = !danger && Math.random() < CONFIG.botSwerve;
+  if (!danger && !swerve) return b.d;
+  if (danger && !perfect && Math.random() < CONFIG.botMistake) return b.d; // didn't see it in time
+  const opts = [b.d, turnLeft(b.d), turnRight(b.d)].map((d) => ({ d, room: space(b.x, b.z, d, 160) + Math.random() * 4 + (d === b.d ? 3 : 0) }));
+  if (swerve) {
+    opts[0].room = -1; // a swerve is a turn
+    const rival = nearestRival(b);
+    if (rival) for (const o of opts) if (o.room > 40 && DX[o.d] * (rival.x - b.x) + DZ[o.d] * (rival.z - b.z) > 0) o.room += 200;
+  }
+  opts.sort((p, q) => q.room - p.room);
+  return opts[0].room > 0 ? opts[0].d : b.d;
+}
+function nearestRival(b) {
+  let best = null, bd = 18 * 18;
+  for (const o of frameRiders) if (o.alive && o.id !== b.id) { const d = (o.x - b.x) ** 2 + (o.z - b.z) ** 2; if (d < bd) { bd = d; best = o; } }
+  return best;
+}
+
+// ── MY CYCLE ────────────────────────────────────────────────────────────────────────
+const myName = (() => { try { return localStorage.getItem("mpa-name") || ""; } catch { return ""; } })() ||
+  ["Neon", "Turbo", "Vector", "Static", "Laser", "Pulse"][Math.floor(Math.random() * 6)] + " " + ["Fox", "Hawk", "Wolf", "Viper", "Comet"][Math.floor(Math.random() * 5)];
+let myColor = COLORS[0]; // picked on join: the first color nobody in the room has
+const me = { key: "", roundId: -1, inRound: false, x: 0, z: 0, d: 0, f: 0, alive: false, trail: [], turns: [], killer: "", diedAt: 0, won: -1 };
+
+function resetForRound(r, key) {
+  me.key = key; me.roundId = r.id; me.turns = []; me.f = 0; me.killer = "";
+  const mine = r.riders.find((x) => x.i === net.sessionId);
+  me.inRound = !!mine;
+  if (mine) { const sp = spawnOf(mine.s); Object.assign(me, { x: sp.x, z: sp.z, d: sp.d, alive: true, trail: [[sp.x, sp.z]] }); cam.h = heading(sp.d); cam.snap = true; }
+  else { me.alive = false; me.trail = []; }
+  sendTrail(); sendBike();
+  for (const v of views.values()) { v.wasAlive = true; v.diedAt = 0; }
+  $("over").hidden = true;
+}
+const sendTrail = () => net.me.set("trail", JSON.stringify({ r: me.roundId, p: me.trail }));
+const sendBike = () => net.me.set("bike", JSON.stringify({ r: me.roundId, x: me.x, z: me.z, d: me.d, a: me.alive ? 1 : 0 }));
+
+/** Left (-1) or right (+1). Turns are queued and happen at the next cell (two can queue, for a U-turn). */
+function queueTurn(side) {
+  const r = round();
+  if (!r || !me.alive || r.phase === "over" || me.turns.length >= 2) return;
+  const base = me.turns.length ? me.turns[me.turns.length - 1] : me.d;
+  me.turns.push(side < 0 ? turnLeft(base) : turnRight(base));
+  tone(side < 0 ? 520 : 620, 0.05, "triangle", 0.04);
+}
+
+function myTick(dt, r) {
+  const mine = r.riders.find((x) => x.i === net.sessionId);
+  const key = r.id + ":" + (mine ? mine.s : "-");
+  if (me.key !== key) resetForRound(r, key);
+  if (!me.inRound || !me.alive || r.phase !== "ride") return;
+  me.f += CONFIG.speed * dt;
+  let moved = false;
+  while (me.f >= 1 && me.alive) {
+    me.f -= 1; moved = true;
+    me.x += DX[me.d]; me.z += DZ[me.d];
+    const hit = inside(me.x, me.z) ? grid[me.z * A + me.x] : -1;
+    if (hit) { crash(hit); break; }
+    grid[me.z * A + me.x] = gridOwner.get(net.sessionId) || 255;
+    if (ATTRACT) { const d = botChoose({ id: net.sessionId, x: me.x, z: me.z, d: me.d, look: 4 }, true); if (d !== me.d) me.turns = [d]; }
+    const d = me.turns.shift();
+    if (d !== undefined && d !== me.d && me.trail.length < MAX_TURNS) { me.d = d; me.trail.push([me.x, me.z]); sendTrail(); }
+  }
+  if (moved && me.alive) sendBike();
+}
+
+function crash(hit) {
+  me.x -= DX[me.d]; me.z -= DZ[me.d]; // stop on the last free cell
+  me.alive = false; me.f = 0; me.diedAt = performance.now();
+  const by = hit === 255 || hit < 0 ? null : frameRiders[hit - 1];
+  me.killer = hit < 0 ? "You hit the edge" : !by ? "You hit a wall" : by.mine ? "You hit your own wall" : `You hit ${by.name}'s wall`;
+  sendBike();
+  boom(me.x + DX[me.d] * 0.5, me.z + DZ[me.d] * 0.5, myColor); cam.shake = 0.6;
+}
+
+/** Everyone in this round as this client sees them: { id, name, color, x, z, d, f, alive, trail, mine, bot }. */
+let frameRiders = [];
+function riders(r) {
+  const out = [], hostNow = isHost(), bots = shared("bots", null);
+  for (const e of r.riders) {
+    const { n, c } = looks(e), base = { id: e.i, name: n, color: c };
+    if (e.i === net.sessionId) { if (me.inRound) out.push({ ...base, x: me.x, z: me.z, d: me.d, f: me.f, alive: me.alive, trail: me.trail, mine: true }); continue; }
+    if (e.b) {
+      if (hostNow) { const b = host.bots.get(e.i); if (b) out.push({ ...base, x: b.x, z: b.z, d: b.d, f: b.f, alive: b.alive, trail: b.trail, bot: true }); continue; }
+      const tr = shared("bt" + e.s, null), b = bots && bots.r === r.id && bots.b.find((x) => x.i === e.i);
+      if (b && tr && tr.r === r.id) out.push({ ...base, x: b.x, z: b.z, d: b.d, alive: !!b.a, trail: tr.p, bot: true });
+      continue;
+    }
+    const bike = field(e.i, "bike"), tr = field(e.i, "trail");
+    if (bike && bike.r === r.id && tr && tr.r === r.id && Array.isArray(tr.p) && tr.p.length) out.push({ ...base, x: bike.x, z: bike.z, d: bike.d, alive: !!bike.a, trail: tr.p });
+  }
+  return out;
+}
+
+// ── EFFECTS ─────────────────────────────────────────────────────────────────────────
+const MAX_SPARKS = 400, sparkMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.16, 0.16, 0.16), additive(1), MAX_SPARKS);
+for (let i = 0; i < MAX_SPARKS; i++) sparkMesh.setColorAt(i, WHITE);
+sparkMesh.count = 0; sparkMesh.frustumCulled = false; scene.add(sparkMesh);
+const sparks = [], flashes = [];
+/** A cycle blows up at cell (x, z): sparks, a flash and a crunch. */
+function boom(x, z, color) {
+  for (let i = 0; i < 70 && sparks.length < MAX_SPARKS; i++) {
+    const a = Math.random() * Math.PI * 2, s = rnd(2, 9);
+    sparks.push({ x: wx(x), y: 0.5, z: wz(z), vx: Math.cos(a) * s, vy: rnd(2, 8), vz: Math.sin(a) * s, life: rnd(0.5, 1.2), max: 1.2, c: new THREE.Color(color) });
+  }
+  const f = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, blending: THREE.AdditiveBlending, depthWrite: false }));
+  f.position.set(wx(x), 0.8, wz(z)); scene.add(f); flashes.push({ m: f, t: 0 });
+  noise(0.35);
+}
+function stepEffects(dt) {
+  let n = 0;
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const p = sparks[i]; p.life -= dt;
+    if (p.life <= 0) { sparks.splice(i, 1); continue; }
+    p.vy -= 14 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+    if (p.y < 0.08) { p.y = 0.08; p.vy *= -0.4; p.vx *= 0.7; p.vz *= 0.7; }
+    const s = p.life / p.max;
+    tmpM.compose(tmpP.set(p.x, p.y, p.z), tmpQ, tmpS.set(s, s, s)); sparkMesh.setMatrixAt(n, tmpM); sparkMesh.setColorAt(n, p.c); n++;
+  }
+  sparkMesh.count = n; sparkMesh.instanceMatrix.needsUpdate = true; sparkMesh.instanceColor.needsUpdate = true;
+  for (let i = flashes.length - 1; i >= 0; i--) {
+    const f = flashes[i]; f.t += dt / 0.45;
+    if (f.t >= 1) { scene.remove(f.m); f.m.material.dispose(); flashes.splice(i, 1); continue; }
+    f.m.scale.setScalar(2 + f.t * 12); f.m.material.opacity = 1 - f.t;
+  }
+}
+// Sound: tiny WebAudio blips, started by the first key or tap.
+let audio = null;
+function unlockAudio() { if (!audio && !ATTRACT) { try { audio = new AudioContext(); } catch { audio = null; } } }
+function tone(freq, dur, type = "square", vol = 0.05) {
+  if (!audio) return;
+  const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime;
+  o.type = type; o.frequency.value = freq; g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(audio.destination); o.start(t); o.stop(t + dur);
+}
+function noise(dur) {
+  if (!audio) return;
+  const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime;
+  o.type = "sawtooth"; o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(30, t + dur);
+  g.gain.setValueAtTime(0.09, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(audio.destination); o.start(t); o.stop(t + dur);
+}
+
+// ── HUD & RESULTS ───────────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+let board = null, boardFor = -1, netDown = false, firstRide = 0, lastCount = "";
+function hud(r) {
+  const t = Date.now();
+  const count = r.phase === "count" ? String(Math.max(1, Math.ceil((r.startAt - t) / 1000))) : r.phase === "ride" && t - r.startAt < 800 ? "GO!" : "";
+  if (count !== lastCount) { lastCount = count; if (count) tone(count === "GO!" ? 880 : 440, 0.18); }
+  $("count").textContent = ATTRACT ? "" : count;
+  if (ATTRACT) { for (const id of ["info", "wins", "msg", "hint", "net"]) $(id).textContent = ""; $("map").style.display = "none"; return; }
+  const total = r.riders.length, left = r.alive.length;
+  $("info").innerHTML = r.phase === "ride" ? `${left} of ${total} left<small>Round ${r.id}</small>` : `Round ${r.id}<small>${r.phase === "count" ? "Get ready" : "Round over"}</small>`;
+  const rows = [...r.riders].sort((a, b) => (r.wins[b.i] || 0) - (r.wins[a.i] || 0));
+  $("wins").innerHTML = rows.map((x) => `<div class="${r.alive.includes(x.i) || r.phase !== "ride" ? "" : "out"} ${x.i === net.sessionId ? "me" : ""}"><i style="color:${looks(x).c}"></i>${esc(x.i === net.sessionId ? "You" : looks(x).n)}<b>${r.wins[x.i] || 0}</b></div>`).join("");
+  $("msg").textContent = !me.inRound && r.phase !== "over" ? "Watching · you ride next round" : me.killer && r.phase === "ride" ? `${me.killer} · watching` : "";
+  if (r.phase === "ride" && !firstRide) firstRide = t;
+  $("hint").style.opacity = !firstRide || t - firstRide < 7000 ? 1 : 0;
+  $("hint").textContent = touchUI ? "Tap left or right to turn · don't touch any trail" : "← → or A D to turn · don't touch any trail";
+  const n = livePlayers().length;
+  $("net").textContent = netDown ? "Reconnecting…" : net.offline ? "Offline: playing with bots" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the round" : ""}`;
+  const showOver = r.phase === "over" && t - (r.endsAt - CONFIG.overFor) > 700;
+  $("over").hidden = !showOver;
+  if (!showOver) return;
+  const wn = r.riders.find((x) => x.i === r.winner);
+  $("winner").textContent = !wn ? "Draw! Nobody survived" : wn.i === net.sessionId ? "You win the round!" : `${looks(wn).n} wins the round`;
+  $("winner").style.color = wn ? looks(wn).c : "#fff";
+  $("standings").innerHTML = rows.map((x) => `<li class="${x.i === net.sessionId ? "me" : ""}">${esc(looks(x).n)}<span>${r.wins[x.i] || 0} won</span></li>`).join("");
+  $("next").textContent = `Next round in ${Math.max(0, Math.ceil((r.endsAt - t) / 1000))}s`;
+  if (boardFor !== r.id) { boardFor = r.id; showBoard(r); }
+}
+function showBoard(r) {
+  const list = $("board");
+  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
+  const won = r.winner === net.sessionId && me.won !== r.id;
+  if (won) me.won = r.id;
+  (won ? board.submit(1, "inc").catch(() => null) : Promise.resolve()).then(() => board.top(10)).then(({ entries }) => {
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li>No wins yet. Be the first.</li>";
+  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+}
+// Minimap: every trail from above.
+const map = $("map"), mctx = map.getContext("2d");
+map.width = map.height = 116 * Math.min(2, devicePixelRatio || 1);
+function drawMap(list) {
+  const k = map.width / A;
+  mctx.clearRect(0, 0, map.width, map.height);
+  mctx.lineWidth = Math.max(1.5, k * 0.9); mctx.lineCap = "square";
+  for (const r of list) {
+    if (!r.alive) continue;
+    mctx.strokeStyle = r.color; mctx.beginPath();
+    r.trail.forEach(([x, z], i) => (i ? mctx.lineTo((x + 0.5) * k, (z + 0.5) * k) : mctx.moveTo((x + 0.5) * k, (z + 0.5) * k)));
+    mctx.lineTo((r.x + 0.5) * k, (r.z + 0.5) * k); mctx.stroke();
+    mctx.fillStyle = r.mine ? "#fff" : r.color; mctx.beginPath(); mctx.arc((r.x + 0.5) * k, (r.z + 0.5) * k, r.mine ? 4 : 3, 0, Math.PI * 2); mctx.fill();
+  }
+}
+
+// ── INPUT ───────────────────────────────────────────────────────────────────────────
+const touchUI = matchMedia("(pointer: coarse)").matches && !ATTRACT;
+$("padL").hidden = $("padR").hidden = !touchUI;
+document.body.classList.toggle("touch", touchUI);
+const KEYS = { ArrowLeft: -1, a: -1, A: -1, ArrowRight: 1, d: 1, D: 1 };
+addEventListener("keydown", (e) => { unlockAudio(); const k = KEYS[e.key]; if (k && !e.repeat) { e.preventDefault(); queueTurn(k); } });
+renderer.domElement.addEventListener("pointerdown", (e) => { e.preventDefault(); unlockAudio(); queueTurn(e.clientX < innerWidth / 2 ? -1 : 1); });
+for (const [id, side] of [["padL", -1], ["padR", 1]]) {
+  const b = $(id);
+  b.addEventListener("pointerdown", (e) => { e.preventDefault(); unlockAudio(); b.classList.add("on"); queueTurn(side); });
+  for (const ev of ["pointerup", "pointercancel", "pointerleave"]) b.addEventListener(ev, () => b.classList.remove("on"));
+}
+document.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
+
+// ── MAIN LOOP ───────────────────────────────────────────────────────────────────────
+const views = new Map(); // id+color -> { g (the cycle), cell, at, h, wasAlive, diedAt } for every cycle drawn
+const cam = { h: 0, snap: true, shake: 0, follow: "" };
+let last = performance.now(), lastHb = 0, lastHud = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixColor(); }
+  let r = round();
+  if (r) { frameRiders = riders(r); buildGrid(frameRiders); }
+  if (isHost()) { hostTick(dt, now); r = round(); } else host.wasHost = false;
+  if (r) { myTick(dt, r); frameRiders = riders(r); drawWorld(r, now, dt); if (now - lastHud > 100) { lastHud = now; hud(r); drawMap(frameRiders); } }
+  stepEffects(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+/** Cycles, trail walls and the chase camera, all from this frame's riders. */
+function drawWorld(r, now, dt) {
+  const seenIds = new Set();
+  let focus = null;
+  for (const rd of frameRiders) {
+    const vid = rd.id + rd.color;
+    seenIds.add(vid);
+    let v = views.get(vid);
+    if (!v) { v = { g: makeBike(rd.color, rd.mine || ATTRACT ? "" : rd.name), cell: "", at: now, h: heading(rd.d), wasAlive: rd.alive, diedAt: 0 }; views.set(vid, v); }
+    const cell = rd.x + "," + rd.z + "," + rd.d;
+    if (cell !== v.cell) { v.cell = cell; v.at = now; }
+    // Where the head is drawn: my cycle and the host's bots are exact; everyone else is eased forward from their last cell.
+    const ahead = !rd.alive || r.phase !== "ride" ? 0 : rd.f !== undefined ? rd.f : Math.min(1, ((now - v.at) / 1000) * CONFIG.speed);
+    const lastPt = rd.trail[rd.trail.length - 1];
+    const straight = lastPt && (DX[rd.d] ? lastPt[1] === rd.z : lastPt[0] === rd.x); // false while a turn is still on its way
+    const hx = rd.x + DX[rd.d] * ahead, hz = rd.z + DZ[rd.d] * ahead;
+    rd.hx = hx; rd.hz = hz;
+    if (v.wasAlive && !rd.alive) { v.diedAt = now; if (!rd.mine && !(rd.bot && isHost())) boom(rd.x + DX[rd.d] * 0.5, rd.z + DZ[rd.d] * 0.5, rd.color); }
+    v.wasAlive = rd.alive;
+    const derez = rd.alive ? 1 : Math.max(0, 1 - (now - v.diedAt) / 700);
+    v.g.visible = rd.alive;
+    v.g.position.set(wx(hx), 0, wz(hz));
+    v.h += Math.atan2(Math.sin(heading(rd.d) - v.h), Math.cos(heading(rd.d) - v.h)) * (1 - Math.pow(0.0001, dt));
+    v.g.rotation.y = v.h;
+    if (derez > 0) {
+      for (let k = 0; k < rd.trail.length - 1; k++) addSeg(rd.trail[k][0], rd.trail[k][1], rd.trail[k + 1][0], rd.trail[k + 1][1], rd.color, derez);
+      if (straight) addSeg(lastPt[0], lastPt[1], hx, hz, rd.color, derez);
+    }
+    if (rd.mine && (rd.alive || now - me.diedAt < 1400)) focus = rd;
+  }
+  finishSegs();
+  for (const [id, v] of views) if (!seenIds.has(id)) { scene.remove(v.g); views.delete(id); }
+  // The camera follows me; when I'm out it follows the winner, or someone still riding.
+  if (!focus) {
+    const pick = (id) => frameRiders.find((x) => x.id === id && (x.alive || r.phase === "over"));
+    focus = (r.phase === "over" && pick(r.winner)) || pick(cam.follow) || frameRiders.find((x) => x.alive) || null;
+    if (focus && focus.id !== cam.follow) { cam.follow = focus.id; }
+  }
+  const fx = focus ? wx(focus.hx) : 0, fz = focus ? wz(focus.hz) : 0;
+  const orbit = r.phase === "over" && focus && focus.alive;
+  const wantH = orbit ? cam.h + dt * 0.6 : focus ? heading(focus.d) : cam.h + dt * 0.2;
+  cam.h += Math.atan2(Math.sin(wantH - cam.h), Math.cos(wantH - cam.h)) * (orbit ? 1 : 1 - Math.pow(0.004, dt));
+  const tall = camera.aspect < 1; // a phone held upright sees more floor from a little higher up
+  const back = !focus ? 40 : orbit ? 9 : ATTRACT ? 8 : 6, up = !focus ? 30 : orbit ? 5 : ATTRACT ? 6 : tall ? 4.6 : 3.4;
+  const want = new THREE.Vector3(fx - Math.sin(cam.h) * back, up, fz - Math.cos(cam.h) * back);
+  if (cam.snap) { camera.position.copy(want); cam.snap = false; } else camera.position.lerp(want, 1 - Math.pow(0.0005, dt));
+  if (cam.shake > 0) { cam.shake = Math.max(0, cam.shake - dt); camera.position.x += rnd(-1, 1) * cam.shake; camera.position.y += rnd(-1, 1) * cam.shake * 0.5; }
+  const look = tall || ATTRACT ? 3 : 5;
+  camera.lookAt(fx + Math.sin(cam.h) * look, 0.6, fz + Math.cos(cam.h) * look);
+}
+
+/** If someone with a lower id has my color (the room can look empty at the moment I join), take a free one. */
+function fixColor() {
+  const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId);
+  if (!others.some(([id, p]) => p.color === myColor && id < net.sessionId)) return;
+  const taken = new Set(others.map(([, p]) => p.color));
+  myColor = COLORS.find((c) => !taken.has(c)) || myColor;
+  net.me.set("color", myColor);
+}
+
+(async function start() {
+  net = await connect();
+  net.onState((st) => { S = st; });
+  net.onDisconnect(() => { netDown = true; $("net").textContent = "Reconnecting…"; });
+  net.onReconnect(() => { netDown = false; });
+  if (!net.offline && typeof MP !== "undefined") board = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }).leaderboard(CONFIG.board);
+  const taken = new Set(Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.color));
+  myColor = COLORS.find((c) => !taken.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
+  net.me.set({ n: myName, color: myColor, hb: Date.now() });
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
