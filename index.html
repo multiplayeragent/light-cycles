@@ -637,6 +637,7 @@ const views = new Map(); // id+color -> { g (the cycle), cell, at, h, wasAlive, 
 const cam = { h: 0, snap: true, shake: 0, follow: "" };
 let last = performance.now(), lastHb = 0, lastHud = 0;
 function frame(now) {
+  requestAnimationFrame(frame);
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // never negative: the first frame can be stamped before `last`
   if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixColor(); }
   let r = round();
@@ -645,7 +646,6 @@ function frame(now) {
   if (r) { myTick(dt, r); frameRiders = riders(r); drawWorld(r, now, dt); if (now - lastHud > 100) { lastHud = now; hud(r); drawMap(frameRiders); } }
   stepEffects(dt);
   renderer.render(scene, camera);
-  requestAnimationFrame(frame);
 }
 
 /** Cycles, trail walls and the chase camera, all from this frame's riders. */
