@@ -24,7 +24,7 @@
   .touch #net { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 92px); } .touch #hint { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 120px); }
   #over { position: fixed; inset: 0; display: grid; place-items: center; background: #02030a99; pointer-events: none; }
   #over[hidden], .pad[hidden] { display: none; }
-  .card { width: min(360px, 88vw); max-height: 72vh; overflow: auto; padding: 20px; border-radius: 16px; background: #0a1024ee; border: 1px solid #39f3ff55;
+  .card { box-sizing: border-box; width: min(402px, calc(100vw - 32px)); max-height: 72vh; overflow: auto; padding: 20px; border-radius: 16px; background: #0a1024ee; border: 1px solid #39f3ff55;
           box-shadow: 0 0 40px #39f3ff33; pointer-events: auto; }
   .card h2 { margin: 0 0 10px; font-size: 24px; text-align: center; }
   .card h3 { margin: 14px 0 4px; font-size: 13px; color: #39f3ff; text-transform: uppercase; letter-spacing: .06em; }
@@ -498,7 +498,7 @@ function crash(hit) {
 /** Everyone in this round as this client sees them: { id, name, color, x, z, d, f, alive, trail, mine, bot }. */
 let frameRiders = [];
 function riders(r) {
-  const out = [], hostNow = isHost(), bots = shared("bots", null);
+  const out = [], hostNow = isHost(), bots = shared("bots", null), live = new Set(livePlayers());
   for (const e of r.riders) {
     const { n, c } = looks(e), base = { id: e.i, name: n, color: c };
     if (e.i === net.sessionId) { if (me.inRound) out.push({ ...base, x: me.x, z: me.z, d: me.d, f: me.f, alive: me.alive, trail: me.trail, mine: true }); continue; }
@@ -509,7 +509,7 @@ function riders(r) {
       continue;
     }
     const bike = field(e.i, "bike"), tr = field(e.i, "trail");
-    if (bike && bike.r === r.id && tr && tr.r === r.id && Array.isArray(tr.p) && tr.p.length) out.push({ ...base, x: bike.x, z: bike.z, d: bike.d, alive: !!bike.a, trail: tr.p });
+    if (bike && bike.r === r.id && tr && tr.r === r.id && Array.isArray(tr.p) && tr.p.length) out.push({ ...base, x: bike.x, z: bike.z, d: bike.d, alive: !!bike.a && live.has(e.i), trail: tr.p }); // no heartbeat = out, like riderAlive()
   }
   return out;
 }
@@ -637,7 +637,7 @@ const views = new Map(); // id+color -> { g (the cycle), cell, at, h, wasAlive, 
 const cam = { h: 0, snap: true, shake: 0, follow: "" };
 let last = performance.now(), lastHb = 0, lastHud = 0;
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // never negative: the first frame can be stamped before `last`
   if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixColor(); }
   let r = round();
   if (r) { frameRiders = riders(r); buildGrid(frameRiders); }
@@ -699,11 +699,11 @@ function drawWorld(r, now, dt) {
   camera.lookAt(fx + Math.sin(cam.h) * look, 0.6, fz + Math.cos(cam.h) * look);
 }
 
-/** If someone with a lower id has my color (the room can look empty at the moment I join), take a free one. */
+/** If someone with a lower id (or a bot) has my color (the room can look empty at the moment I join), take a free one. */
 function fixColor() {
-  const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId);
-  if (!others.some(([id, p]) => p.color === myColor && id < net.sessionId)) return;
-  const taken = new Set(others.map(([, p]) => p.color));
+  const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId), botColors = (round()?.riders || []).filter((x) => x.b).map((x) => x.c);
+  if (!others.some(([id, p]) => p.color === myColor && id < net.sessionId) && !botColors.includes(myColor)) return;
+  const taken = new Set([...others.map(([, p]) => p.color), ...botColors]);
   myColor = COLORS.find((c) => !taken.has(c)) || myColor;
   net.me.set("color", myColor);
 }
@@ -714,7 +714,7 @@ function fixColor() {
   net.onDisconnect(() => { netDown = true; $("net").textContent = "Reconnecting…"; });
   net.onReconnect(() => { netDown = false; });
   if (!net.offline && typeof MP !== "undefined") board = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }).leaderboard(CONFIG.board);
-  const taken = new Set(Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.color));
+  const taken = new Set([...Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.color), ...(shared("round", null)?.riders || []).filter((x) => x.b).map((x) => x.c)]);
   myColor = COLORS.find((c) => !taken.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
   net.me.set({ n: myName, color: myColor, hb: Date.now() });
   requestAnimationFrame(frame);
