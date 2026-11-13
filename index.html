@@ -30,6 +30,7 @@
   .card h3 { margin: 14px 0 4px; font-size: 13px; color: #39f3ff; text-transform: uppercase; letter-spacing: .06em; }
   .card ol { margin: 0; padding-left: 24px; font-size: 14px; }
   .card li span { float: right; font-variant-numeric: tabular-nums; }
+  .card li.note { list-style: none; margin-left: -24px; }
   .card li.me { color: #ffe53d; font-weight: 700; }
   .card p { margin: 12px 0 0; font-size: 13px; opacity: .8; text-align: center; }
   .pad { position: fixed; bottom: max(16px, env(safe-area-inset-bottom)); width: 84px; height: 84px; border-radius: 50%; border: 2px solid #39f3ff88;
@@ -53,7 +54,7 @@
 <div id="over" hidden><div class="card">
   <h2 id="winner">Round over</h2>
   <ol id="standings"></ol>
-  <h3>Most rounds won, all time</h3><ol id="board"><li>Loading…</li></ol>
+  <h3>Most rounds won, all time</h3><ol id="board"><li class="note">Loading…</li></ol>
   <p id="next"></p>
 </div></div>
 <script type="module">
@@ -588,7 +589,7 @@ function hud(r) {
   $("over").hidden = !showOver;
   if (!showOver) return;
   const wn = r.riders.find((x) => x.i === r.winner);
-  $("winner").textContent = !wn ? "Draw! Nobody survived" : wn.i === net.sessionId ? "You win the round!" : `${looks(wn).n} wins the round`;
+  $("winner").textContent = !wn ? (r.alive.length ? "Time's up! A draw" : "Draw! Nobody survived") : wn.i === net.sessionId ? "You win the round!" : `${looks(wn).n} wins the round`;
   $("winner").style.color = wn ? looks(wn).c : "#fff";
   $("standings").innerHTML = rows.map((x) => `<li class="${x.i === net.sessionId ? "me" : ""}">${esc(looks(x).n)}<span>${r.wins[x.i] || 0} won</span></li>`).join("");
   $("next").textContent = `Next round in ${Math.max(0, Math.ceil((r.endsAt - t) / 1000))}s`;
@@ -596,12 +597,12 @@ function hud(r) {
 }
 function showBoard(r) {
   const list = $("board");
-  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
+  if (!board) { list.innerHTML = '<li class="note">Leaderboards need a connection.</li>'; return; }
   const won = r.winner === net.sessionId && me.won !== r.id;
   if (won) me.won = r.id;
   (won ? board.submit(1, "inc").catch(() => null) : Promise.resolve()).then(() => board.top(10)).then(({ entries }) => {
-    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li>No wins yet. Be the first.</li>";
-  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : '<li class="note">No wins yet. Be the first.</li>';
+  }).catch(() => { list.innerHTML = `<li class="note">Couldn't load the leaderboard.</li>`; });
 }
 // Minimap: every trail from above.
 const map = $("map"), mctx = map.getContext("2d");
@@ -666,7 +667,14 @@ function drawWorld(r, now, dt) {
     const ahead = !rd.alive || r.phase !== "ride" ? 0 : rd.f !== undefined ? rd.f : Math.min(1, ((now - v.at) / 1000) * CONFIG.speed);
     const lastPt = rd.trail[rd.trail.length - 1];
     const straight = lastPt && (DX[rd.d] ? lastPt[1] === rd.z : lastPt[0] === rd.x); // false while a turn is still on its way
-    const hx = rd.x + DX[rd.d] * ahead, hz = rd.z + DZ[rd.d] * ahead;
+    let hx = rd.x + DX[rd.d] * ahead, hz = rd.z + DZ[rd.d] * ahead;
+    if (rd.f === undefined && rd.alive && r.phase === "ride" && v.d === rd.d && Math.abs(rd.x + DX[rd.d] * 0.5 - v.hx) + Math.abs(rd.z + DZ[rd.d] * 0.5 - v.hz) < 3) {
+      // someone else's cycle: its cell arrives 12-15 times a second, unevenly. Ride on at full speed and settle toward it, instead of stepping (a turn or a big gap snaps).
+      const k = Math.min(1, dt * 1.5);
+      hx = v.hx + DX[rd.d] * CONFIG.speed * dt; hz = v.hz + DZ[rd.d] * CONFIG.speed * dt;
+      hx += (rd.x + DX[rd.d] * 0.5 - hx) * k; hz += (rd.z + DZ[rd.d] * 0.5 - hz) * k;
+    }
+    v.d = rd.d; v.hx = hx; v.hz = hz;
     rd.hx = hx; rd.hz = hz;
     if (v.wasAlive && !rd.alive) { v.diedAt = now; if (!rd.mine && !(rd.bot && isHost())) boom(rd.x + DX[rd.d] * 0.5, rd.z + DZ[rd.d] * 0.5, rd.color); }
     v.wasAlive = rd.alive;
