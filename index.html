@@ -626,7 +626,8 @@ $("padL").hidden = $("padR").hidden = !touchUI;
 document.body.classList.toggle("touch", touchUI);
 const KEYS = { ArrowLeft: -1, a: -1, A: -1, ArrowRight: 1, d: 1, D: 1 };
 addEventListener("keydown", (e) => { unlockAudio(); const k = KEYS[e.key]; if (k && !e.repeat) { e.preventDefault(); queueTurn(k); } });
-renderer.domElement.addEventListener("pointerdown", (e) => { e.preventDefault(); unlockAudio(); queueTurn(e.clientX < innerWidth / 2 ? -1 : 1); });
+renderer.domElement.addEventListener("pointerdown", (e) => { e.preventDefault(); unlockAudio(); if (e.button === 0) queueTurn(e.clientX < innerWidth / 2 ? -1 : 1); });
+renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
 for (const [id, side] of [["padL", -1], ["padR", 1]]) {
   const b = $(id);
   b.addEventListener("pointerdown", (e) => { e.preventDefault(); unlockAudio(); b.classList.add("on"); queueTurn(side); });
