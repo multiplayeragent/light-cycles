@@ -6,7 +6,7 @@ Your trail is a wall. Last rider wins. A multiplayer starter game from [Multipla
 
 ## How it plays
 
-Every rider leaves a glowing wall behind it. Turn to cut the others off. Touch any wall or the edge and you are out. The last rider still going wins the round.
+Every rider leaves a glowing wall behind it. Turn to cut the others off. Touch any wall or the edge and you are out. The last rider still going wins the round; a round still going after 90 seconds is a draw.
 
 **Controls:** Arrow keys or A/D to turn, or tap the left or right side of the screen.
 

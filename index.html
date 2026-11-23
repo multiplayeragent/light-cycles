@@ -576,7 +576,8 @@ function hud(r) {
   $("count").textContent = ATTRACT ? "" : count;
   if (ATTRACT) { for (const id of ["info", "wins", "msg", "hint", "net"]) $(id).textContent = ""; $("map").style.display = "none"; return; }
   const total = r.riders.length, left = r.alive.length;
-  $("info").innerHTML = r.phase === "ride" ? `${left} of ${total} left<small>Round ${r.id}</small>` : `Round ${r.id}<small>${r.phase === "count" ? "Get ready" : "Round over"}</small>`;
+  const drawIn = Math.max(0, Math.ceil((r.startAt + CONFIG.maxRound - t) / 1000)); // a round that runs this long ends in a draw: count down its last seconds
+  $("info").innerHTML = r.phase === "ride" ? `${left} of ${total} left<small>Round ${r.id}${drawIn <= 15 ? ` · draw in ${drawIn}s` : ""}</small>` : `Round ${r.id}<small>${r.phase === "count" ? "Get ready" : "Round over"}</small>`;
   const rows = [...r.riders].sort((a, b) => (r.wins[b.i] || 0) - (r.wins[a.i] || 0));
   $("wins").innerHTML = rows.map((x) => `<div class="${r.alive.includes(x.i) || r.phase !== "ride" ? "" : "out"} ${x.i === net.sessionId ? "me" : ""}"><i style="color:${looks(x).c}"></i>${esc(x.i === net.sessionId ? "You" : looks(x).n)}<b>${r.wins[x.i] || 0}</b></div>`).join("");
   $("msg").textContent = !me.inRound && r.phase !== "over" ? "Watching · you ride next round" : me.killer && r.phase === "ride" ? `${me.killer} · watching` : "";
